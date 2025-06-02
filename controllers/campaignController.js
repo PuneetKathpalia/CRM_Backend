@@ -1,29 +1,55 @@
 const Campaign = require("../models/Campaign");
 const Segment = require("../models/Segment");
 const Customer = require("../models/Customer");
-const CommunicationLog = require("../models/CommunicationLog"); 
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args)); 
+const CommunicationLog = require("../models/CommunicationLog");
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const createCampaign = async (req, res) => {
   try {
+    console.log("Creating campaign with data:", req.body);
     const { name, segmentId, message } = req.body;
     const userId = req.user.sub;
 
-    const segment = await Segment.findOne({ _id: segmentId, userId });
-    if (!segment) return res.status(404).json({ error: "Segment not found" });
-
-    const query = { userId };
-    for (const rule of segment.rules) {
-      if (rule.field && rule.operator && rule.value !== undefined) {
-        if (rule.operator === "gt") query[rule.field] = { $gt: rule.value };
-        else if (rule.operator === "lt") query[rule.field] = { $lt: rule.value };
-        else query[rule.field] = rule.value;
-      }
+    // Validate required fields
+    if (!name || !segmentId || !message) {
+      return res.status(400).json({ 
+        error: "Missing required fields",
+        details: "Name, segment ID, and message are required"
+      });
     }
 
-    const audience = await Customer.find(query);
-    let sent = 0, failed = 0;
+    // Find the segment
+    const segment = await Segment.findOne({ _id: segmentId, userId });
+    if (!segment) {
+      console.error("Segment not found:", { segmentId, userId });
+      return res.status(404).json({ error: "Segment not found" });
+    }
 
+    console.log("Found segment:", segment);
+
+    // Build query based on segment rules
+    const query = { userId };
+    const { rules } = segment;
+
+    if (rules.totalSpend) {
+      query.totalSpend = { [`$${rules.totalSpend.operator}`]: rules.totalSpend.value };
+    }
+    if (rules.visits) {
+      query.visits = { [`$${rules.visits.operator}`]: rules.visits.value };
+    }
+    if (rules.inactiveDays) {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - rules.inactiveDays);
+      query.lastActive = { $lt: cutoff };
+    }
+
+    console.log("Customer query:", query);
+
+    // Find matching customers
+    const audience = await Customer.find(query);
+    console.log("Found audience size:", audience.length);
+
+    // Create the campaign
     const campaign = await Campaign.create({
       userId,
       name,
@@ -33,13 +59,18 @@ const createCampaign = async (req, res) => {
       failed: 0,
     });
 
+    console.log("Created campaign:", campaign);
+
+    let sent = 0, failed = 0;
+
+    // Process each customer
     for (const cust of audience) {
       try {
         const result = await fetch("http://localhost:8000/api/vendor/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            campaignId: campaign._id, 
+            campaignId: campaign._id,
             customerId: cust._id,
             message: `Hi ${cust.name}, ${message}`,
           }),
@@ -49,18 +80,19 @@ const createCampaign = async (req, res) => {
         const status = data.status === "SENT" ? "SENT" : "FAILED";
 
         await CommunicationLog.create({
-        userId,
-        campaignId: campaign._id,
-        customerId: cust._id,
-        message: `Hi ${cust.name}, ${message}`,
-        status,
-  });
-
+          userId,
+          campaignId: campaign._id,
+          customerId: cust._id,
+          message: `Hi ${cust.name}, ${message}`,
+          status,
+        });
 
         status === "SENT" ? sent++ : failed++;
       } catch (err) {
+        console.error("Failed to send message to customer:", cust._id, err);
         failed++;
         await CommunicationLog.create({
+          userId,
           campaignId: campaign._id,
           customerId: cust._id,
           message: `Hi ${cust.name}, ${message}`,
@@ -69,25 +101,61 @@ const createCampaign = async (req, res) => {
       }
     }
 
+    // Update campaign with final stats
     campaign.sent = sent;
     campaign.failed = failed;
     await campaign.save();
 
+    console.log("Campaign completed:", { sent, failed });
     res.status(201).json(campaign);
   } catch (err) {
-    console.error("❌ Campaign error:", err);
-    res.status(500).json({ error: "Failed to launch campaign" });
+    console.error("Campaign creation failed:", err);
+    res.status(500).json({ 
+      error: "Failed to launch campaign",
+      details: err.message
+    });
   }
 };
 
 const getCampaigns = async (req, res) => {
   try {
-    const campaigns = await Campaign.find({ userId: req.user.sub }).sort({ createdAt: -1 });
+    const campaigns = await Campaign.find({ userId: req.user.sub })
+      .populate('segmentId')
+      .sort({ createdAt: -1 });
     res.json(campaigns);
   } catch (err) {
-    console.error("❌ Error fetching campaigns:", err);
-    res.status(500).json({ message: "Failed to fetch campaigns" });
+    console.error("Error fetching campaigns:", err);
+    res.status(500).json({ 
+      error: "Failed to fetch campaigns",
+      details: err.message
+    });
   }
 };
 
-module.exports = { createCampaign, getCampaigns };
+const deleteCampaign = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.sub;
+
+    const campaign = await Campaign.findOne({ _id: id, userId });
+    if (!campaign) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    // Delete associated communication logs
+    await CommunicationLog.deleteMany({ campaignId: id });
+
+    // Delete the campaign
+    await Campaign.deleteOne({ _id: id });
+
+    res.json({ message: "Campaign deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting campaign:", err);
+    res.status(500).json({ 
+      error: "Failed to delete campaign",
+      details: err.message
+    });
+  }
+};
+
+module.exports = { createCampaign, getCampaigns, deleteCampaign };

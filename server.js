@@ -6,7 +6,7 @@ const CommunicationLog = require("./models/CommunicationLog");
 
 dotenv.config();
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 8000;  // Changed back to 8000
 
 app.use(cors());
 app.use(express.json());
@@ -20,7 +20,7 @@ app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 app.use("/api/delivery", require("./routes/deliveryRoutes"));
 app.use("/api/vendor", require("./routes/vendorRoutes"));
 app.use("/api/ai", require("./routes/aiRoutes"));
-
+app.use("/api", require("./routes/messageRoutes"));
 
 app.post("/api/vendor/send", async (req, res) => {
   const { campaignId, customerId, message } = req.body;
