@@ -55,7 +55,7 @@ Ready to get things running? Here's how:
     ```
     Your backend should be up and running! 🚀
 
-## 🏗️ How It All Works
+##  How It All Works
 
 Here's a quick peek under the hood:
 
