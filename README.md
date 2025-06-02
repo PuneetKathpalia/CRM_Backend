@@ -1,6 +1,6 @@
-# �� Mini CRM Backend
+# �� CRM Backend
 
-Hey there! 👋 Welcome to the backend part of our Mini CRM Platform. We've built this with **Node.js + Express + MongoDB** to handle all the heavy lifting for your customer relationship management needs.
+Hey there! 👋 Welcome to the backend part of our CRM Platform. We've built this with **Node.js + Express + MongoDB** to handle all the heavy lifting for your customer relationship management needs.
 
 ## 🎯 What We Handle
 
